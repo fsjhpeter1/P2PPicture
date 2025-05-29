@@ -1,21 +1,134 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <title>P2P Screen Share</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>6位數字代碼 P2P 螢幕分享</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+        Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+      text-align: center;
+      margin: 40px 20px;
+      background: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      margin-bottom: 5px;
+    }
+    p {
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #666;
+    }
+    input[type="text"] {
+      width: 120px;
+      font-size: 1.4rem;
+      padding: 8px;
+      border: 2px solid #ccc;
+      border-radius: 5px;
+      text-align: center;
+      letter-spacing: 0.3em;
+    }
+    button {
+      font-size: 1.3rem;
+      padding: 8px 20px;
+      margin-left: 10px;
+      border: none;
+      border-radius: 5px;
+      background-color: #2a9d8f;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    button:hover {
+      background-color: #21867a;
+    }
+    video {
+      margin-top: 30px;
+      width: 90vw;
+      max-width: 720px;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      background: black;
+    }
+  </style>
 </head>
 <body>
-  <h1>P2P 螢幕分享</h1>
-  <button id="share-screen">分享畫面</button>
+  <h1>6位數字代碼 P2P 螢幕分享</h1>
+  <p>請輸入6位數字連線碼，兩端輸入相同代碼即可連線</p>
+
+  <input id="room" type="text" maxlength="6" placeholder="123456" pattern="\d{6}" />
+  <button id="startBtn">開始分享或接收</button>
+
   <video id="remoteVideo" autoplay playsinline></video>
 
-  <h2>連線資訊</h2>
-  <textarea id="offer" placeholder="Offer / Answer"></textarea><br>
-  <button id="create-offer">建立 Offer</button>
-  <button id="create-answer">建立 Answer</button>
-  <button id="set-remote-desc">設定對方描述</button>
+  <!-- Simple-Peer -->
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9/simplepeer.min.js"></script>
+  <!-- Signalhub WebSocket -->
+  <script src="https://cdn.jsdelivr.net/npm/signalhubws@3.0.2/index.js"></script>
 
-  <script src="script.js"></script>
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const roomInput = document.getElementById('room');
+    const remoteVideo = document.getElementById('remoteVideo');
+
+    let peer, hub;
+
+    startBtn.onclick = async () => {
+      const room = roomInput.value.trim();
+      if (!/^\d{6}$/.test(room)) {
+        alert('請輸入 6 位數字的連線碼');
+        return;
+      }
+
+      // 建立 signalhub 連線 (使用公開免費的 signalhub server)
+      hub = signalhub(room, ['https://signalhub-jccqtwhdwc.now.sh']);
+
+      // 確認角色：確定 = 分享者（發送者）、取消 = 接收者
+      const isInitiator = confirm('按「確定」開始分享畫面（發送者），按「取消」作為接收者');
+
+      peer = new SimplePeer({
+        initiator: isInitiator,
+        trickle: false,
+        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+      });
+
+      // 當本端有 signal 要發送時，發布到 signalhub
+      peer.on('signal', data => {
+        hub.broadcast('signal', data);
+      });
+
+      // 訂閱 signalhub 訊息，接收來自對方的 signal 並回傳給 peer
+      hub.subscribe('signal').on('data', signal => {
+        try {
+          // 避免重複處理相同訊號（可自行擴充）
+          peer.signal(signal);
+        } catch (e) {
+          // ignore invalid signal errors
+        }
+      });
+
+      // 收到對方傳來的媒體串流
+      peer.on('stream', stream => {
+        remoteVideo.srcObject = stream;
+      });
+
+      // 錯誤處理
+      peer.on('error', err => {
+        alert('WebRTC 連線錯誤：' + err);
+      });
+
+      // 如果是分享者，取得螢幕分享串流並加入 peer
+      if (isInitiator) {
+        try {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          peer.addStream(stream);
+        } catch (err) {
+          alert('無法取得螢幕分享權限');
+        }
+      }
+    };
+  </script>
 </body>
 </html>
